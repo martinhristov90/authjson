@@ -50,8 +50,10 @@ vault read -field=plugin_version sys/auth/jsonauth/tune
 vault write auth/jsonauth/config \
     users_file_path="/example/users.json"
 
+
+
 vault write auth/jsonauth/role/core policies=core_policy token_max_ttl=12h token_ttl=1h
-vault write auth/jsonauth/role/backline policies=backline_policy token_max_ttl=3h token_ttl=1h
+vault write auth/jsonauth/role/backline token_policies=backline_policy,backline_policy token_max_ttl=3h token_ttl=1h
 vault write auth/jsonauth/role/manager policies=manager_policy token_max_ttl=36h token_ttl=1h
 
 # Test for backline
