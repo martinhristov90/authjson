@@ -9,6 +9,9 @@ import (
 	"github.com/hashicorp/vault/sdk/helper/tokenutil"
 	"github.com/hashicorp/vault/sdk/logical"
 	"strings"
+	"time"
+	"github.com/hashicorp/go-sockaddr"
+
 )
 
 const (
@@ -19,9 +22,16 @@ const (
 type roleStorageEntry struct {
 	// including all fields of TokenParams struct to our roleStorageEntry struct
 	tokenutil.TokenParams
+	// Deprecated by TokenParams
+	Policies   []string      `json:"policies" structs:"policies" mapstructure:"policies"`
+	NumUses    int           `json:"num_uses" mapstructure:"num_uses" structs:"num_uses"`
+	TTL        time.Duration `json:"ttl" structs:"ttl" mapstructure:"ttl"`
+	MaxTTL     time.Duration `json:"max_ttl" structs:"max_ttl" mapstructure:"max_ttl"`
+	Period     time.Duration `json:"period" mapstructure:"period" structs:"period"`
+	BoundCIDRs []*sockaddr.SockAddrMarshaler
 }
 
-// Returns a StorageEntry for give Storage and role name. The Storage object is part of logical.Request objects being given to the backend
+// Returns a StorageEntry for given Storage and role name. The Storage object is part of logical.Request objects being given to the backend
 func (b *backend) role(ctx context.Context, s logical.Storage, name string) (*roleStorageEntry, error) {
 	raw, err := s.Get(ctx, fmt.Sprintf("%s%s", rolePrefix, strings.ToLower(name)))
 	if err != nil {
@@ -70,15 +80,33 @@ func (b *backend) PathRoleCRUD() *framework.Path {
 			},
 			"policies": {
 				Type:        framework.TypeCommaStringSlice,
-				Description: "List of policies assigned to the role",
+				Description: tokenutil.DeprecationText("token_policies"),
+				Deprecated:  true,
 			},
-			"token_max_ttl": {
-				Type:        framework.TypeDurationSecond,
-				Description: "Max ttl for the role",
+			"num_uses": {
+				Type:        framework.TypeInt,
+				Description: tokenutil.DeprecationText("token_num_uses"),
+				Deprecated:  true,
 			},
-			"token_ttl": {
+			"ttl": {
 				Type:        framework.TypeDurationSecond,
-				Description: "defines token ttl",
+				Description: tokenutil.DeprecationText("token_ttl"),
+				Deprecated:  true,
+			},
+			"max_ttl": {
+				Type:        framework.TypeDurationSecond,
+				Description: tokenutil.DeprecationText("token_max_ttl"),
+				Deprecated:  true,
+			},
+			"period": {
+				Type:        framework.TypeDurationSecond,
+				Description: tokenutil.DeprecationText("token_period"),
+				Deprecated:  true,
+			},
+			"bound_cidrs": {
+				Type:        framework.TypeCommaStringSlice,
+				Description: tokenutil.DeprecationText("token_bound_cidrs"),
+				Deprecated:  true,
 			},
 		},
 		ExistenceCheck: b.pathRoleExistenceCheck,
@@ -89,7 +117,9 @@ func (b *backend) PathRoleCRUD() *framework.Path {
 			logical.DeleteOperation: b.pathRoleDelete,
 		},
 	}
-
+	// Adding "usual" token fields from the tokenutil package. The one that are mentioned above are explictly depricated
+	// For example period(old)=token_period(new)
+	tokenutil.AddTokenFields(pathRole.Fields)
 	// Returning CRUD paths for Role
 	return pathRole
 }
@@ -170,12 +200,34 @@ func (b *backend) pathRoleCreateUpdate(ctx context.Context, req *logical.Request
 
 	var resp *logical.Response
 
-	if Policies, ok := d.GetOk("policies"); ok {
-		// removes duplicate policies and more...
-		role.TokenPolicies = policyutil.ParsePolicies(Policies.([]string))
-	} else if req.Operation == logical.CreateOperation {
-		role.TokenPolicies = d.Get("policies").([]string)
+	{
+		if err := tokenutil.UpgradeValue(d, "policies", "token_policies", &role.Policies, &role.TokenPolicies); err != nil {
+			return logical.ErrorResponse(err.Error()), nil
+		}
+
+		if err := tokenutil.UpgradeValue(d, "bound_cidrs", "token_bound_cidrs", &role.BoundCIDRs, &role.TokenBoundCIDRs); err != nil {
+			return logical.ErrorResponse(err.Error()), nil
+		}
+
+		if err := tokenutil.UpgradeValue(d, "num_uses", "token_num_uses", &role.NumUses, &role.TokenNumUses); err != nil {
+			return logical.ErrorResponse(err.Error()), nil
+		}
+
+		if err := tokenutil.UpgradeValue(d, "ttl", "token_ttl", &role.TTL, &role.TokenTTL); err != nil {
+			return logical.ErrorResponse(err.Error()), nil
+		}
+
+		if err := tokenutil.UpgradeValue(d, "max_ttl", "token_max_ttl", &role.MaxTTL, &role.TokenMaxTTL); err != nil {
+			return logical.ErrorResponse(err.Error()), nil
+		}
+
+		if err := tokenutil.UpgradeValue(d, "period", "token_period", &role.Period, &role.TokenPeriod); err != nil {
+			return logical.ErrorResponse(err.Error()), nil
+		}
 	}
+
+	// removing duplicate policies
+	role.TokenPolicies = policyutil.ParsePolicies(role.TokenPolicies)
 
 	// Store the entry.
 	entry, err := logical.StorageEntryJSON(rolePrefix+strings.ToLower(roleName), role)
