@@ -6,6 +6,7 @@ import (
 
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/vault/sdk/framework"
+	"github.com/hashicorp/vault/sdk/helper/cidrutil"
 	"github.com/hashicorp/vault/sdk/logical"
 	"github.com/martinhristov90/authjson/internal/jsonauthhelper"
 )
@@ -83,26 +84,40 @@ func (b *backend) pathAuthLogin(ctx context.Context, req *logical.Request, d *fr
 		return nil, logical.ErrPermissionDenied
 	}
 
+	// Enforce the role's bound CIDRs against the client address, no CIDRs configured means no restriction
+	var remoteAddr string
+	if req.Connection != nil {
+		remoteAddr = req.Connection.RemoteAddr
+	}
+
+	if !cidrutil.RemoteAddrIsOk(remoteAddr, userRole.TokenBoundCIDRs) {
+		b.Logger().Debug("login failed - client address not in the role's bound CIDRs", "remote_addr", remoteAddr)
+		return nil, logical.ErrPermissionDenied
+	}
+
 	// Login successful, create and return the auth response
-	return &logical.Response{
-		Auth: &logical.Auth{
-			DisplayName: fmt.Sprintf("%s %s", user.GivenName, user.FamilyName),
-			//Internal data is not visible to the user, usually used during renew operations
-			InternalData: map[string]interface{}{
-				"team_role": user.TeamRole,
-			},
-			Policies: userRole.TokenPolicies,
-			Metadata: map[string]string{
-				"team_role":   user.TeamRole,
-				"nickname":    user.Nickname,
-				"given_name":  user.GivenName,
-				"family_name": user.FamilyName,
-			},
-			LeaseOptions: logical.LeaseOptions{
-				TTL:       userRole.TokenTTL,
-				MaxTTL:    userRole.TokenMaxTTL,
-				Renewable: true,
-			},
+	authResponse := &logical.Auth{
+		DisplayName: fmt.Sprintf("%s %s", user.GivenName, user.FamilyName),
+		//Internal data is not visible to the user, usually used during renew operations
+		InternalData: map[string]interface{}{
+			"team_role": user.TeamRole,
 		},
-	}, nil
+		Policies: userRole.TokenPolicies,
+		Metadata: map[string]string{
+			"team_role":   user.TeamRole,
+			"nickname":    user.Nickname,
+			"given_name":  user.GivenName,
+			"family_name": user.FamilyName,
+		},
+		LeaseOptions: logical.LeaseOptions{
+			TTL:       userRole.TokenTTL,
+			MaxTTL:    userRole.TokenMaxTTL,
+			Renewable: true,
+		},
+	}
+	// Apply all token settings of the role: policies, TTLs, period, num_uses, type, bound CIDRs, etc.
+	userRole.PopulateTokenAuth(authResponse)
+
+	// Login successful
+	return &logical.Response{Auth: authResponse}, nil
 }

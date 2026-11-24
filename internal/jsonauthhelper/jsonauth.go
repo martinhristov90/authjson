@@ -33,7 +33,6 @@ func LoadUsersFromFile(filePath string) ([]User, error) {
 }
 
 func Authenticate(userID, password string, users []User) *User {
-	
 	var match *User
 	for i := range users {
 		if users[i].UserID == userID {
@@ -41,12 +40,12 @@ func Authenticate(userID, password string, users []User) *User {
 		}
 	}
 
-	// Password should not be empty
-	if password == "" || match.Password == "" {
+	if match == nil {
 		return nil
 	}
 
-	if match == nil {
+	// Password should not be empty
+	if password == "" || match.Password == "" {
 		return nil
 	}
 

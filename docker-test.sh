@@ -5,17 +5,11 @@
 
 set -ex
 
-# Detect available container engine (prioritizes Podman, falls back to Docker)
-if command -v podman >/dev/null 2>&1; then
-    CONTAINER_CMD="podman"
-elif command -v docker >/dev/null 2>&1; then
-    CONTAINER_CMD="docker"
-else
-    echo "Error: Neither Podman nor Docker is installed." >&2
-    exit 1
+if ! command -v docker >/dev/null 2>&1 && command -v podman >/dev/null 2>&1; then
+    docker() {
+        podman "$@"
+    }
 fi
-
-echo "Using container engine: $CONTAINER_CMD"
 
 GOOS=linux go build -o ./bin/vault-auth-jsonauth cmd/jsonauth/main.go
 

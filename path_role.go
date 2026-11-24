@@ -22,12 +22,12 @@ type roleStorageEntry struct {
 	// including all fields of TokenParams struct to our roleStorageEntry struct
 	tokenutil.TokenParams
 	// Deprecated by TokenParams
-	Policies   []string      `json:"policies" structs:"policies" mapstructure:"policies"`
-	NumUses    int           `json:"num_uses" mapstructure:"num_uses" structs:"num_uses"`
-	TTL        time.Duration `json:"ttl" structs:"ttl" mapstructure:"ttl"`
-	MaxTTL     time.Duration `json:"max_ttl" structs:"max_ttl" mapstructure:"max_ttl"`
-	Period     time.Duration `json:"period" mapstructure:"period" structs:"period"`
-	BoundCIDRs []*sockaddr.SockAddrMarshaler
+	Policies   []string                      `json:"policies" structs:"policies" mapstructure:"policies"`
+	NumUses    int                           `json:"num_uses" mapstructure:"num_uses" structs:"num_uses"`
+	TTL        time.Duration                 `json:"ttl" structs:"ttl" mapstructure:"ttl"`
+	MaxTTL     time.Duration                 `json:"max_ttl" structs:"max_ttl" mapstructure:"max_ttl"`
+	Period     time.Duration                 `json:"period" mapstructure:"period" structs:"period"`
+	BoundCIDRs []*sockaddr.SockAddrMarshaler `json:"bound_cidrs" structs:"bound_cidrs" mapstructure:"bound_cidrs"`
 }
 
 // Returns a StorageEntry for given Storage and role name. The Storage object is part of logical.Request objects being given to the backend

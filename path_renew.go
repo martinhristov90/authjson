@@ -26,6 +26,12 @@ func (b *backend) PathAuthRenew(ctx context.Context, req *logical.Request, d *fr
 		return nil, fmt.Errorf("Cannot renew, the role does not exist")
 	}
 	a := framework.LeaseExtend(role.TokenTTL, role.TokenMaxTTL, b.System())
+	resp, err := a(ctx, req, d)
+	if err != nil || resp == nil || resp.Auth == nil {
+		return resp, err
+	}
+	// Keep the role's period on renewal, otherwise periodic tokens would lose it
+	resp.Auth.Period = role.TokenPeriod
 	b.Logger().Trace("auth renew succeeded")
-	return a(ctx, req, d)
+	return resp, nil
 }
