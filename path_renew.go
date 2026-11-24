@@ -3,7 +3,6 @@ package authjson
 import (
 	"context"
 	"errors"
-	"fmt"
 	"github.com/hashicorp/vault/sdk/framework"
 	"github.com/hashicorp/vault/sdk/logical"
 )
@@ -20,10 +19,17 @@ func (b *backend) PathAuthRenew(ctx context.Context, req *logical.Request, d *fr
 	}
 
 	// We verify if the users credentials are still valid, usually JWT, Kubernetes plugins just verify if the role still exists during renewal process
-	secretValueRoleName := req.Auth.InternalData["team_role"].(string)
+	secretValueRoleName, ok := req.Auth.InternalData["team_role"].(string)
+	if !ok {
+		b.Logger().Trace("renew operation expected string for team_role")
+		return nil, logical.ErrPermissionDenied
+	}
 	role, err := b.role(ctx, req.Storage, secretValueRoleName)
 	if err != nil {
-		return nil, fmt.Errorf("Cannot renew, the role does not exist")
+		return nil, err
+	}
+	if role == nil {
+		return nil, logical.ErrPermissionDenied
 	}
 	a := framework.LeaseExtend(role.TokenTTL, role.TokenMaxTTL, b.System())
 	resp, err := a(ctx, req, d)
