@@ -109,11 +109,6 @@ func (b *backend) pathAuthLogin(ctx context.Context, req *logical.Request, d *fr
 			"given_name":  user.GivenName,
 			"family_name": user.FamilyName,
 		},
-		LeaseOptions: logical.LeaseOptions{
-			TTL:       userRole.TokenTTL,
-			MaxTTL:    userRole.TokenMaxTTL,
-			Renewable: true,
-		},
 	}
 	// Apply all token settings of the role: policies, TTLs, period, num_uses, type, bound CIDRs, etc.
 	userRole.PopulateTokenAuth(authResponse)
