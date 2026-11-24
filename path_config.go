@@ -2,9 +2,11 @@ package authjson
 
 import (
 	"context"
+	"reflect"
+
 	"github.com/hashicorp/vault/sdk/framework"
 	"github.com/hashicorp/vault/sdk/logical"
-	"reflect"
+	"github.com/martinhristov90/authjson/internal/jsonauthhelper"
 )
 
 const (
@@ -56,6 +58,11 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 	usersFilePath := d.Get("users_file_path").(string) // Extracting the users_file_path from the request data
 	if usersFilePath == "" {
 		return logical.ErrorResponse("users_file_path is required"), logical.ErrInvalidRequest
+	}
+
+	// Checking if we actually can read the file, if not we error
+	if _, err := jsonauthhelper.LoadUsersFromFile(usersFilePath); err != nil {
+		return logical.ErrorResponse("cannot load users from %q: %v", usersFilePath, err), nil
 	}
 
 	// Creating the config struct to store the configuration entry in JSON format

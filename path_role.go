@@ -133,7 +133,7 @@ func (b *backend) pathRoleList(ctx context.Context, req *logical.Request, d *fra
 
 	roles, err := req.Storage.List(ctx, "role/")
 	if err != nil {
-		b.Logger().Error("failure to list roles %v", err)
+		b.Logger().Error("failure to list roles", "err", err)
 		return nil, err
 	}
 
