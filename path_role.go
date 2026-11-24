@@ -176,8 +176,8 @@ func (b *backend) pathRoleCreateUpdate(ctx context.Context, req *logical.Request
 		return logical.ErrorResponse("missing role name"), nil
 	}
 
-	b.l.RLock()
-	defer b.l.RUnlock()
+	b.l.Lock()
+	defer b.l.Unlock()
 
 	// Checking if the role already exists, if it does it is stored to role, so it can be updated later
 	role, err := b.role(ctx, req.Storage, roleName)
