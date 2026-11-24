@@ -11,6 +11,7 @@ import (
 const (
 	userConfigPath      = "./integration_test_data/users.json"
 	userConfigPathWrong = "./integration_test_data/usersWrongPath.json"
+	userConfigPathEmpty = ""
 )
 
 func TestPathConfigReadWrite(t *testing.T) {
@@ -51,38 +52,48 @@ func TestPathConfigReadWrite(t *testing.T) {
 	assert.Equal(t, userConfigPath, resp.Data["users_file_path"])
 }
 
-func TestPathConfigReadWriteWrongPath(t *testing.T) {
-	// Get the test backend and storage instance, this is in-memory for testing purposes
-	b, storage := getTestBackend(t) // getTestBackend is defined in backend_test.go
-	// Prepare the data for the write operation
-	data := map[string]interface{}{
-		"users_file_path": userConfigPathWrong,
+func TestPathConfigReadWriteInvalidPath(t *testing.T) {
+	tests := []struct{ name, path, wantErr string }{
+		{"empty", userConfigPathEmpty, "users_file_path is required"},
+		{"missing file", userConfigPathWrong, "cannot load users from"},
 	}
-	// Create a request for the write operation
-	req := new(logical.Request)
-	req.Operation = logical.UpdateOperation
-	req.Storage = storage
-	req.Path = configPath
-	req.Data = data
-	// The write must be rejected with an error response and no Go error, because the file does not exist
-	resp, err := b.HandleRequest(context.Background(), req)
-	assert.NoError(t, err)
-	if assert.NotNil(t, resp) {
-		assert.True(t, resp.IsError(), "expected error response, got %#v", resp)
-		assert.Contains(t, resp.Error().Error(), "cannot load users from")
-		assert.Contains(t, resp.Error().Error(), userConfigPathWrong)
-	}
-	// Create a request for the read operation
-	req = &logical.Request{
-		Operation: logical.ReadOperation,
-		Storage:   storage,
-		Path:      configPath,
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Get the test backend and storage instance, this is in-memory for testing purposes
+			// getTestBackend is defined in backend_test.go
+			b, storage := getTestBackend(t)
+			// Prepare the data for the write operation
+			data := map[string]interface{}{
+				"users_file_path": tt.path,
+			}
 
-	// Nothing must have been stored, so reading the configuration fails
-	resp, err = b.HandleRequest(context.Background(), req)
-	assert.Equal(t, logical.ErrInvalidRequest, err)
-	if assert.NotNil(t, resp) {
-		assert.True(t, resp.IsError())
+			// Create a request for the write operation
+			req := new(logical.Request)
+			req.Operation = logical.UpdateOperation
+			req.Storage = storage
+			req.Path = configPath
+			req.Data = data
+
+			// The write must be rejected with an error response and no Go error
+			resp, err := b.HandleRequest(context.Background(), req)
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+			require.True(t, resp.IsError(), "expected error response, got %#v", resp)
+			require.Contains(t, resp.Error().Error(), tt.wantErr)
+
+			// Create a request for the read operation
+			req = &logical.Request{
+				Operation: logical.ReadOperation,
+				Storage:   storage,
+				Path:      configPath,
+			}
+
+			// Nothing must have been stored, so reading the configuration fails
+			resp, err = b.HandleRequest(context.Background(), req)
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+			require.True(t, resp.IsError())
+			assert.Contains(t, resp.Error().Error(), "configuration not found")
+		})
 	}
 }
