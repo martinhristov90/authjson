@@ -18,9 +18,28 @@ This is a sample project that creates a Vault plugin using the official Hashicor
 ### Usage:
 - Clone the repository: `git clone https://github.com/martinhristov90/authjson`.
 - Change into its directory: `cd authjson`.
-- Create a sample `users.json` file in the root directory of the plugin. The name is configurable via `users_file_path` parameter of the config path.
-- Example `users.json`
-- Run `./docker-test.sh` command for running a test deployment inside a Docker container, using the Vault's official image.
+- Create a `users.json` file, for example by copying the template: `cp users.example.json users.json`. The path is set via the `users_file_path` parameter of the config path. `users.json` in the root directory is git-ignored, so real hashes are not committed by accident.
+- The `password` field holds the **bcrypt hash** of the user's password, never the password itself. Create the hash with the helper of this repository, the password is read from the standard input, so it does not end up in the shell history:
+    ```
+    read -rs PW && printf '%s' "$PW" | go run ./cmd/hashpw
+    ```
+  The default cost is 12, it can be changed via `-cost` (4 to 31). Passwords are limited to 72 bytes, which is a limit of bcrypt.
+- Example `users.json` (`$2a$12$<SNIP>` stands for the full hash. `users.example.json` holds the placeholder `REPLACE_WITH_BCRYPT_HASH` instead, and `./docker-test.sh` fills it with the hash of `hashed_password_here`, the password used in the examples of this README):
+    ```json
+    [
+      {
+        "user_id": "user-martin",
+        "email": "marti@hashitest.com",
+        "password": "$2a$12$<SNIP>",
+        "given_name": "Martin",
+        "family_name": "Hristov",
+        "nickname": "Marti",
+        "team_role": "backline"
+      }
+    ]
+    ```
+- Every user needs a unique `user_id`, a `password` that is a bcrypt hash and a `team_role`. The file is validated when the configuration is written, and again on every login and renew. If it is invalid (duplicate IDs, empty fields, plaintext passwords) writing the configuration fails with a message listing all the problems, and logins and renewals are denied until the file is fixed.
+- Run `./docker-test.sh` command for running a test deployment inside a Docker container, using the Vault's official image. The script generates `bin/users.json` from `users.example.json` and uses it.
 - Expected output (or similar based on `users.json`file):
     ```
     vault write auth/jsonauth/login password=hashed_password_here username=user-marti
@@ -79,8 +98,8 @@ This is a sample project that creates a Vault plugin using the official Hashicor
     ```
 -----
 ### TODO:
-  - [ ] Hash the password of the users + salt
-  - [ ] Implement `renew` operation based on user's role
+  - [x] Hash the password of the users + salt (bcrypt)
+  - [x] Implement `renew` operation based on user's role
   - [ ] Provide more options for building the plugin via the Makefile
   - [ ] Create more thorough testing
   - [ ] Implement the `-method` option for the Vault binary

@@ -3,3 +3,5 @@ NOTES
 vault-auth-jsonauth
 bin/
 .vscode
+/users.json
+/integration_test_data/users.json

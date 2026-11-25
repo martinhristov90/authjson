@@ -2,8 +2,11 @@ package authjson
 
 import (
 	"context"
-	"github.com/hashicorp/vault/sdk/logical"
+	"os"
 	"testing"
+
+	"github.com/hashicorp/vault/sdk/logical"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPathLogin(t *testing.T) {
@@ -92,4 +95,23 @@ func TestPathLogin(t *testing.T) {
 		t.Fatalf("expected permission denied error, got err: %s resp: %#v\n", err, resp)
 	}
 
+}
+
+// A users file that was changed to plaintext passwords after the configuration was written must not allow logins
+func TestPathLogin_PlaintextPasswordsInFile(t *testing.T) {
+	b, storage, usersFile, _ := setupRenewBackend(t)
+
+	plaintext := `[{"user_id":"user-martin","password":"pw","team_role":"backline"}]`
+	require.NoError(t, os.WriteFile(usersFile, []byte(plaintext), 0o600))
+
+	// Neither the plaintext value nor its hash matches, the file is not usable at all
+	for _, password := range []string{"pw", ""} {
+		_, err := b.HandleRequest(context.Background(), &logical.Request{
+			Operation: logical.UpdateOperation,
+			Path:      "login",
+			Storage:   storage,
+			Data:      map[string]interface{}{"username": "user-martin", "password": password},
+		})
+		require.Equal(t, logical.ErrPermissionDenied, err)
+	}
 }

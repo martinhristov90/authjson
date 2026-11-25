@@ -2,10 +2,13 @@ package authjson
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"testing"
+
 	"github.com/hashicorp/vault/sdk/logical"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 const (
@@ -90,6 +93,48 @@ func TestPathConfigReadWriteInvalidPath(t *testing.T) {
 
 			// Nothing must have been stored, so reading the configuration fails
 			resp, err = b.HandleRequest(context.Background(), req)
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+			require.True(t, resp.IsError())
+			assert.Contains(t, resp.Error().Error(), "configuration not found")
+		})
+	}
+}
+
+// A users file that is malformed or fails validation is rejected when the configuration is written.
+// The individual validation rules are tested in the jsonauthhelper package, here we only check that
+// a failure of the loader results in an error response and that nothing is stored.
+func TestPathConfigWriteInvalidUsersFile(t *testing.T) {
+	tests := []struct{ name, content string }{
+		{"fails validation", `[{"user_id":"a","password":"HASH","team_role":"r"},{"user_id":"a","password":"HASH","team_role":"r"}]`},
+		{"password is not a hash", `[{"user_id":"a","password":"plaintext","team_role":"r"}]`},
+		{"malformed JSON", `[{"user_id":"a"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b, storage := getTestBackend(t)
+
+			usersFile := filepath.Join(t.TempDir(), "users.json")
+			require.NoError(t, os.WriteFile(usersFile, withHash(tt.content), 0o600))
+
+			resp, err := b.HandleRequest(context.Background(), &logical.Request{
+				Operation: logical.UpdateOperation,
+				Storage:   storage,
+				Path:      configPath,
+				Data:      map[string]interface{}{"users_file_path": usersFile},
+			})
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+			require.True(t, resp.IsError(), "expected error response, got %#v", resp)
+			require.Contains(t, resp.Error().Error(), "cannot load users from")
+			require.Contains(t, resp.Error().Error(), usersFile)
+
+			// Nothing must have been stored
+			resp, err = b.HandleRequest(context.Background(), &logical.Request{
+				Operation: logical.ReadOperation,
+				Storage:   storage,
+				Path:      configPath,
+			})
 			require.NoError(t, err)
 			require.NotNil(t, resp)
 			require.True(t, resp.IsError())
