@@ -2,6 +2,7 @@ package authjson
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/hashicorp/go-hclog"
@@ -35,29 +36,9 @@ func (b *backend) pathAuthLogin(ctx context.Context, req *logical.Request, d *fr
 	username := d.Get("username").(string)
 	password := d.Get("password").(string)
 
-	// Read the configuration from storage, error if we fail to read it
-	entry, err := req.Storage.Get(ctx, configPath)
-	if err != nil {
-		b.Logger().Error("failed to read configuration from storage", "err", err.Error())
-		return nil, logical.ErrPermissionDenied
-	}
-	// If configuration is not found we do not allow login, this is printed in operational logs of Vault at ERROR level
-	if entry == nil {
-		b.Logger().Error("configuration not found in storage")
-		return nil, logical.ErrPermissionDenied
-	}
-
-	// The configuration would be stored here, we re-read it at every login, might not be the best approach though
-	var config jsonAuthConfig
-
-	// Decode the configuration, bail out if we fail
-	if err := entry.DecodeJSON(&config); err != nil {
-		b.Logger().Error("failed to decode configuration", "err", err.Error())
-		return nil, logical.ErrPermissionDenied
-	}
-
-	// Load users from the JSON file specified in the configuration
-	users, err := jsonauthhelper.LoadUsersFromFile(config.UsersFilePath)
+	// Load the users from the file specified in the configuration, we re-read it at every login, might not be the best approach though
+	// If the configuration or the file is not usable we do not allow login, this is printed in operational logs of Vault at ERROR level
+	users, err := b.loadUsers(ctx, req.Storage)
 	if err != nil {
 		b.Logger().Error("failed to load users", "err", err.Error())
 		return nil, logical.ErrPermissionDenied
@@ -101,6 +82,7 @@ func (b *backend) pathAuthLogin(ctx context.Context, req *logical.Request, d *fr
 		//Internal data is not visible to the user, usually used during renew operations
 		InternalData: map[string]interface{}{
 			"team_role": user.TeamRole,
+			"user_id":   user.UserID,
 		},
 		Policies: userRole.TokenPolicies,
 		Metadata: map[string]string{
@@ -109,15 +91,32 @@ func (b *backend) pathAuthLogin(ctx context.Context, req *logical.Request, d *fr
 			"given_name":  user.GivenName,
 			"family_name": user.FamilyName,
 		},
-		LeaseOptions: logical.LeaseOptions{
-			TTL:       userRole.TokenTTL,
-			MaxTTL:    userRole.TokenMaxTTL,
-			Renewable: true,
-		},
 	}
 	// Apply all token settings of the role: policies, TTLs, period, num_uses, type, bound CIDRs, etc.
 	userRole.PopulateTokenAuth(authResponse)
 
 	// Login successful
 	return &logical.Response{Auth: authResponse}, nil
+}
+
+// loadUsers reads the configuration from storage and loads the users from the file it points to
+func (b *backend) loadUsers(ctx context.Context, s logical.Storage) ([]jsonauthhelper.User, error) {
+	entry, err := s.Get(ctx, configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read configuration from storage: %w", err)
+	}
+	if entry == nil {
+		return nil, errors.New("configuration not found in storage")
+	}
+
+	var config jsonAuthConfig
+	if err := entry.DecodeJSON(&config); err != nil {
+		return nil, fmt.Errorf("failed to decode configuration: %w", err)
+	}
+
+	users, err := jsonauthhelper.LoadUsersFromFile(config.UsersFilePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load users file: %w", err)
+	}
+	return users, nil
 }

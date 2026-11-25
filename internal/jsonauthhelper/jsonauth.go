@@ -32,13 +32,19 @@ func LoadUsersFromFile(filePath string) ([]User, error) {
 	return users, nil
 }
 
-func Authenticate(userID, password string, users []User) *User {
+// FindUser returns the user with the given ID, or nil if there is none
+func FindUser(userID string, users []User) *User {
 	var match *User
 	for i := range users {
 		if users[i].UserID == userID {
 			match = &users[i]
 		}
 	}
+	return match
+}
+
+func Authenticate(userID, password string, users []User) *User {
+	match := FindUser(userID, users)
 
 	if match == nil {
 		return nil
