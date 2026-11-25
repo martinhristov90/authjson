@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Copyright (c) HashiCorp, Inc.
-# SPDX-License-Identifier: MPL-2.0
-
 
 set -ex
 
@@ -63,9 +60,9 @@ vault write auth/jsonauth/config \
 
 
 
-vault write auth/jsonauth/role/core policies=core_policy token_max_ttl=12h token_ttl=1h
-vault write auth/jsonauth/role/backline token_policies=backline_policy,backline_policy token_max_ttl=3h token_ttl=1h
-vault write auth/jsonauth/role/manager policies=manager_policy token_max_ttl=36h token_ttl=1h
+vault write auth/jsonauth/role/core token_policies=core_policy token_max_ttl=12h token_ttl=1h
+vault write auth/jsonauth/role/backline token_policies=backline_policy token_max_ttl=3h token_ttl=1h
+vault write auth/jsonauth/role/manager token_policies=manager_policy token_max_ttl=36h token_ttl=1h
 
 # Test for backline
 VAULT_TOKEN=  vault write auth/jsonauth/login password="$DEMO_PASSWORD" username="user-martin"
