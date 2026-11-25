@@ -37,22 +37,24 @@ Run `./docker-test.sh`. It builds the plugin, starts a Vault server in a contain
 
 ## Install
 1. Clone the repository and change into its directory: `git clone https://github.com/martinhristov90/authjson && cd authjson`.
-2. Build the plugin for the OS and architecture of the Vault server (Linux on amd64 in this example):
+2. Build the plugin. The version is taken from the nearest git tag (for example the tag `v0.3.0` gives `0.3.0`, builds without a tag get a `0.0.0-dev-<commit>` version). `make version` prints it, and `make dev` builds for Linux (`GOOS` and `OUTPUT` can be overridden). For other architectures, set `GOARCH` of the Vault server:
     ```
-    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o vault-auth-jsonauth cmd/jsonauth/main.go
+    VERSION=$(make -s version)
+    GOARCH=amd64 make dev
     ```
-3. Put the binary in the `plugin_directory` of the Vault server, and register it:
+3. Put the binary in the `plugin_directory` of the Vault server, and register it with the same version:
     ```
     vault write sys/plugins/catalog/auth/vault-auth-jsonauth \
     sha_256=$(shasum -a 256 vault-auth-jsonauth | cut -d' ' -f1) \
-    command="vault-auth-jsonauth"
+    command="vault-auth-jsonauth" \
+    version="v$VERSION"
     ```
-4. Enable the plugin at the desired path (usually `jsonauth`). The version must match the one in [`internal/version/version.go`](internal/version/version.go):
+4. Enable the plugin at the desired path (usually `jsonauth`):
     ```
     vault auth enable \
     -path="jsonauth" \
     -plugin-name="vault-auth-jsonauth" \
-    -plugin-version=0.2.0 \
+    -plugin-version="v$VERSION" \
     plugin
     ```
 5. Create the users file, see [Users file](#users-file).

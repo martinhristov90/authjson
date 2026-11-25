@@ -8,7 +8,9 @@ if ! command -v docker >/dev/null 2>&1 && command -v podman >/dev/null 2>&1; the
     }
 fi
 
-GOOS=linux go build -o ./bin/vault-auth-jsonauth cmd/jsonauth/main.go
+# Same version as the one of the git tag, see the Makefile
+VERSION=$(make -s version)
+make dev OUTPUT=./bin/vault-auth-jsonauth VERSION="$VERSION"
 
 # Generate the users file from the template (bcrypt hashes are not committed)
 DEMO_PASSWORD="hashed_password_here"
@@ -45,12 +47,13 @@ export VAULT_TOKEN=$(echo "$initoutput" | jq -r .root_token)
 
 vault write sys/plugins/catalog/auth/vault-auth-jsonauth \
     sha_256=$(shasum -a 256 ./bin/vault-auth-jsonauth | cut -d' ' -f1) \
-    command="vault-auth-jsonauth"
+    command="vault-auth-jsonauth" \
+    version="v$VERSION"
 
 vault auth enable \
     -path="jsonauth" \
     -plugin-name="vault-auth-jsonauth" \
-    -plugin-version=0.2.0 \
+    -plugin-version="v$VERSION" \
     plugin
 
 vault read -field=plugin_version sys/auth/jsonauth/tune
