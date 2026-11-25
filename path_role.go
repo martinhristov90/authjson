@@ -4,14 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/hashicorp/go-sockaddr"
 	"github.com/hashicorp/vault/sdk/framework"
 	"github.com/hashicorp/vault/sdk/helper/policyutil"
 	"github.com/hashicorp/vault/sdk/helper/tokenutil"
 	"github.com/hashicorp/vault/sdk/logical"
 	"strings"
 	"time"
-	"github.com/hashicorp/go-sockaddr"
-
 )
 
 const (
@@ -23,12 +22,12 @@ type roleStorageEntry struct {
 	// including all fields of TokenParams struct to our roleStorageEntry struct
 	tokenutil.TokenParams
 	// Deprecated by TokenParams
-	Policies   []string      `json:"policies" structs:"policies" mapstructure:"policies"`
-	NumUses    int           `json:"num_uses" mapstructure:"num_uses" structs:"num_uses"`
-	TTL        time.Duration `json:"ttl" structs:"ttl" mapstructure:"ttl"`
-	MaxTTL     time.Duration `json:"max_ttl" structs:"max_ttl" mapstructure:"max_ttl"`
-	Period     time.Duration `json:"period" mapstructure:"period" structs:"period"`
-	BoundCIDRs []*sockaddr.SockAddrMarshaler
+	Policies   []string                      `json:"policies" structs:"policies" mapstructure:"policies"`
+	NumUses    int                           `json:"num_uses" mapstructure:"num_uses" structs:"num_uses"`
+	TTL        time.Duration                 `json:"ttl" structs:"ttl" mapstructure:"ttl"`
+	MaxTTL     time.Duration                 `json:"max_ttl" structs:"max_ttl" mapstructure:"max_ttl"`
+	Period     time.Duration                 `json:"period" mapstructure:"period" structs:"period"`
+	BoundCIDRs []*sockaddr.SockAddrMarshaler `json:"bound_cidrs" structs:"bound_cidrs" mapstructure:"bound_cidrs"`
 }
 
 // Returns a StorageEntry for given Storage and role name. The Storage object is part of logical.Request objects being given to the backend
@@ -134,7 +133,7 @@ func (b *backend) pathRoleList(ctx context.Context, req *logical.Request, d *fra
 
 	roles, err := req.Storage.List(ctx, "role/")
 	if err != nil {
-		b.Logger().Error("failure to list roles %v", err)
+		b.Logger().Error("failure to list roles", "err", err)
 		return nil, err
 	}
 
@@ -177,8 +176,8 @@ func (b *backend) pathRoleCreateUpdate(ctx context.Context, req *logical.Request
 		return logical.ErrorResponse("missing role name"), nil
 	}
 
-	b.l.RLock()
-	defer b.l.RUnlock()
+	b.l.Lock()
+	defer b.l.Unlock()
 
 	// Checking if the role already exists, if it does it is stored to role, so it can be updated later
 	role, err := b.role(ctx, req.Storage, roleName)

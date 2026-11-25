@@ -6,12 +6,9 @@ import (
 
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/vault/sdk/framework"
+	"github.com/hashicorp/vault/sdk/helper/cidrutil"
 	"github.com/hashicorp/vault/sdk/logical"
 	"github.com/martinhristov90/authjson/internal/jsonauthhelper"
-)
-
-const (
-	secret_value = "secret_value"
 )
 
 func (b *backend) PathLogin() *framework.Path {
@@ -39,7 +36,7 @@ func (b *backend) pathAuthLogin(ctx context.Context, req *logical.Request, d *fr
 	password := d.Get("password").(string)
 
 	// Read the configuration from storage, error if we fail to read it
-	entry, err := req.Storage.Get(context.Background(), "config")
+	entry, err := req.Storage.Get(ctx, configPath)
 	if err != nil {
 		b.Logger().Error("failed to read configuration from storage", "err", err.Error())
 		return nil, logical.ErrPermissionDenied
@@ -73,54 +70,54 @@ func (b *backend) pathAuthLogin(ctx context.Context, req *logical.Request, d *fr
 		}
 	}
 
-	// Check if the user exists
-	if !jsonauthhelper.CheckUserExistance(username, users) {
-		// printing this only in debug logs, might be too verbose for operational logs at info level
-		// if it does not exist we bail out without checking the password
-		b.Logger().Debug("login failed - user not found", "err", logical.ErrPermissionDenied.Error())
-		return nil, logical.ErrPermissionDenied
-	}
-
-	// Check if the password is correct and it belongs to the user that is trying to log in
-	if !jsonauthhelper.CheckUserPassword(username, password, users) {
-		b.Logger().Debug("login failed - incorrect password", "err", logical.ErrPermissionDenied.Error())
+	user := jsonauthhelper.Authenticate(username, password, users)
+	if user == nil {
+		b.Logger().Debug("login failed", "err", logical.ErrPermissionDenied.Error())
 		return nil, logical.ErrPermissionDenied
 	}
 
 	b.Logger().Trace("login succeeded")
 
-	userinfo, err := jsonauthhelper.ReturnUserInfo(username, users)
-	if err != nil {
-		b.Logger().Error("failed to retrieve user info", "err", err.Error())
-		return nil, logical.ErrPermissionDenied
-	}
-
-	userRole, err := b.checkRoleAssignment(ctx, req.Storage, userinfo.TeamRole)
+	userRole, err := b.checkRoleAssignment(ctx, req.Storage, user.TeamRole)
 	if err != nil {
 		b.Logger().Error("error while checking role assignment")
 		return nil, logical.ErrPermissionDenied
 	}
 
+	// Enforce the role's bound CIDRs against the client address, no CIDRs configured means no restriction
+	var remoteAddr string
+	if req.Connection != nil {
+		remoteAddr = req.Connection.RemoteAddr
+	}
+
+	if !cidrutil.RemoteAddrIsOk(remoteAddr, userRole.TokenBoundCIDRs) {
+		b.Logger().Debug("login failed - client address not in the role's bound CIDRs", "remote_addr", remoteAddr)
+		return nil, logical.ErrPermissionDenied
+	}
+
 	// Login successful, create and return the auth response
-	return &logical.Response{
-		Auth: &logical.Auth{
-			DisplayName: fmt.Sprintf("%s %s", userinfo.GivenName, userinfo.FamilyName),
-			//Internal data is not visible to the user, usually used during renew operations
-			InternalData: map[string]interface{}{
-				"team_role": userinfo.TeamRole,
-			},
-			Policies: userRole.TokenPolicies,
-			Metadata: map[string]string{
-				"team_role":   userinfo.TeamRole,
-				"nickname":    userinfo.Nickname,
-				"given_name":  userinfo.GivenName,
-				"family_name": userinfo.FamilyName,
-			},
-			LeaseOptions: logical.LeaseOptions{
-				TTL:       userRole.TokenTTL,
-				MaxTTL:    userRole.TokenMaxTTL,
-				Renewable: true,
-			},
+	authResponse := &logical.Auth{
+		DisplayName: fmt.Sprintf("%s %s", user.GivenName, user.FamilyName),
+		//Internal data is not visible to the user, usually used during renew operations
+		InternalData: map[string]interface{}{
+			"team_role": user.TeamRole,
 		},
-	}, nil
+		Policies: userRole.TokenPolicies,
+		Metadata: map[string]string{
+			"team_role":   user.TeamRole,
+			"nickname":    user.Nickname,
+			"given_name":  user.GivenName,
+			"family_name": user.FamilyName,
+		},
+		LeaseOptions: logical.LeaseOptions{
+			TTL:       userRole.TokenTTL,
+			MaxTTL:    userRole.TokenMaxTTL,
+			Renewable: true,
+		},
+	}
+	// Apply all token settings of the role: policies, TTLs, period, num_uses, type, bound CIDRs, etc.
+	userRole.PopulateTokenAuth(authResponse)
+
+	// Login successful
+	return &logical.Response{Auth: authResponse}, nil
 }

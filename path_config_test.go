@@ -3,11 +3,15 @@ package authjson
 import (
 	"context"
 	"github.com/hashicorp/vault/sdk/logical"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"testing"
 )
 
 const (
-	userConfigPath = "/path/to/users.json"
+	userConfigPath      = "./integration_test_data/users.json"
+	userConfigPathWrong = "./integration_test_data/usersWrongPath.json"
+	userConfigPathEmpty = ""
 )
 
 func TestPathConfigReadWrite(t *testing.T) {
@@ -25,9 +29,8 @@ func TestPathConfigReadWrite(t *testing.T) {
 	req.Data = data
 	// Perform the write operation
 	resp, err := b.HandleRequest(context.Background(), req)
-	if err != nil {
-		t.Fatalf("err: %s resp: %#v\n", err, resp)
-	}
+	require.NoError(t, err)
+	require.False(t, resp != nil && resp.IsError(), "write failed: %#v", resp)
 
 	// Create a request for the read operation
 	req = &logical.Request{
@@ -40,14 +43,57 @@ func TestPathConfigReadWrite(t *testing.T) {
 	// Perform the read operation to verify the write
 	// HandleRequest just handles whatever request if thrown at the backed, if it supports it of course
 	resp, err = b.HandleRequest(context.Background(), req)
-	if err != nil {
-		t.Fatalf("err: %s resp: %#v\n", err, resp)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.False(t, resp.IsError(), "read failed %#v", resp)
 
 	// Verify that the read response contains the correct users_file_path
 	// We are just checking that the value we wrote is the same as the one we read
-	if resp.Data["users_file_path"] != userConfigPath {
-		t.Fatalf("expected users_file_path to be %s, got %s", userConfigPath, resp.Data["users_file_path"])
-	}
+	assert.Equal(t, userConfigPath, resp.Data["users_file_path"])
+}
 
+func TestPathConfigReadWriteInvalidPath(t *testing.T) {
+	tests := []struct{ name, path, wantErr string }{
+		{"empty", userConfigPathEmpty, "users_file_path is required"},
+		{"missing file", userConfigPathWrong, "cannot load users from"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Get the test backend and storage instance, this is in-memory for testing purposes
+			// getTestBackend is defined in backend_test.go
+			b, storage := getTestBackend(t)
+			// Prepare the data for the write operation
+			data := map[string]interface{}{
+				"users_file_path": tt.path,
+			}
+
+			// Create a request for the write operation
+			req := new(logical.Request)
+			req.Operation = logical.UpdateOperation
+			req.Storage = storage
+			req.Path = configPath
+			req.Data = data
+
+			// The write must be rejected with an error response and no Go error
+			resp, err := b.HandleRequest(context.Background(), req)
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+			require.True(t, resp.IsError(), "expected error response, got %#v", resp)
+			require.Contains(t, resp.Error().Error(), tt.wantErr)
+
+			// Create a request for the read operation
+			req = &logical.Request{
+				Operation: logical.ReadOperation,
+				Storage:   storage,
+				Path:      configPath,
+			}
+
+			// Nothing must have been stored, so reading the configuration fails
+			resp, err = b.HandleRequest(context.Background(), req)
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+			require.True(t, resp.IsError())
+			assert.Contains(t, resp.Error().Error(), "configuration not found")
+		})
+	}
 }

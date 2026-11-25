@@ -5,6 +5,12 @@
 
 set -ex
 
+if ! command -v docker >/dev/null 2>&1 && command -v podman >/dev/null 2>&1; then
+    docker() {
+        podman "$@"
+    }
+fi
+
 GOOS=linux go build -o ./bin/vault-auth-jsonauth cmd/jsonauth/main.go
 
 # Killing te container if it existed, otherwise true

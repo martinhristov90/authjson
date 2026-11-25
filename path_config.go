@@ -2,9 +2,11 @@ package authjson
 
 import (
 	"context"
+	"reflect"
+
 	"github.com/hashicorp/vault/sdk/framework"
 	"github.com/hashicorp/vault/sdk/logical"
-	"reflect"
+	"github.com/martinhristov90/authjson/internal/jsonauthhelper"
 )
 
 const (
@@ -55,7 +57,13 @@ func (b *backend) PathConfig() *framework.Path {
 func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	usersFilePath := d.Get("users_file_path").(string) // Extracting the users_file_path from the request data
 	if usersFilePath == "" {
-		return logical.ErrorResponse("users_file_path is required"), logical.ErrInvalidRequest
+		// If error is not internal we create ErrorResponse and error is nil
+		return logical.ErrorResponse("users_file_path is required"), nil
+	}
+
+	// Checking if we actually can read the file, if not we error
+	if _, err := jsonauthhelper.LoadUsersFromFile(usersFilePath); err != nil {
+		return logical.ErrorResponse("cannot load users from %q: %v", usersFilePath, err), nil
 	}
 
 	// Creating the config struct to store the configuration entry in JSON format
@@ -66,13 +74,14 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, d *
 	// Creating a storage entry for the configuration data in JSON format
 	entry, err := logical.StorageEntryJSON(configPath, config)
 	if err != nil {
-		return logical.ErrorResponse("failed to create storage entry: %v", err), err
+		return nil, err
 	}
 
 	// Writing the configuration entry to storage backend
 	err = req.Storage.Put(ctx, entry)
 	if err != nil {
-		return logical.ErrorResponse("failed write configuration to storage: %v", err), err
+		// If the error is internal we return nil for response and err
+		return nil, err
 	}
 
 	// Returning nil response and nil error on successful write
@@ -85,11 +94,11 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, d *f
 	// Configpath is a constant defined earlier as "config"
 	entry, err := req.Storage.Get(ctx, configPath)
 	if err != nil {
-		return logical.ErrorResponse("failed to read configuration from storage: %v", err), err
+		return nil, err
 	}
 	// If configuration is not found, return an error response
 	if entry == nil {
-		return logical.ErrorResponse("configuration not found"), logical.ErrInvalidRequest
+		return logical.ErrorResponse("configuration not found"), nil
 	}
 
 	// A structure that will hold the decoded configuration data
@@ -97,7 +106,7 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, d *f
 
 	// Decoding the JSON configuration data from the storage entry and populating the config struct
 	if err := entry.DecodeJSON(&config); err != nil {
-		return logical.ErrorResponse("failed to decode configuration: %v", err), err
+		return nil, err
 	}
 
 	// Using the reflect package to get the name of tag in the jsonAuthConfig struct in case we change it later. It could simply be:

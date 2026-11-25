@@ -1,21 +1,20 @@
 package jsonauthhelper
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"os"
-	"crypto/subtle"
-	"fmt"
 )
 
 // User represents a user in the JSON file
 type User struct {
-	UserID    string `json:"user_id"`
-	Email     string `json:"email"`
-	Password  string `json:"password"`
-	GivenName string `json:"given_name"`
+	UserID     string `json:"user_id"`
+	Email      string `json:"email"`
+	Password   string `json:"password"`
+	GivenName  string `json:"given_name"`
 	FamilyName string `json:"family_name"`
-	Nickname  string `json:"nickname"`
-	TeamRole string `json:"team_role"`
+	Nickname   string `json:"nickname"`
+	TeamRole   string `json:"team_role"`
 }
 
 func LoadUsersFromFile(filePath string) ([]User, error) {
@@ -33,32 +32,26 @@ func LoadUsersFromFile(filePath string) ([]User, error) {
 	return users, nil
 }
 
-func CheckUserExistance(user_id string, users []User) bool {
-	for _, user := range users {
-		if user.UserID == user_id {
-			return true
+func Authenticate(userID, password string, users []User) *User {
+	var match *User
+	for i := range users {
+		if users[i].UserID == userID {
+			match = &users[i]
 		}
 	}
-	return false
-}
 
-func CheckUserPassword(user_id string, password string, users []User) bool {
-	for _, user := range users {
-		// Check if the user ID matches and compare passwords in constant time
-		// to prevent timing attacks
-		if user.UserID == user_id && subtle.ConstantTimeCompare([]byte(password), []byte(user.Password)) != 1 {
-			return false
-		}
+	if match == nil {
+		return nil
 	}
-	return true
-}
 
-func ReturnUserInfo(user_id string, users []User) (*User, error) {
-	for _, user := range users {
-		// Return the user info if the user ID matches
-		if user.UserID == user_id {
-			return &user, nil
-		}
+	// Password should not be empty
+	if password == "" || match.Password == "" {
+		return nil
 	}
-	return nil, fmt.Errorf("user not found")
+
+	if subtle.ConstantTimeCompare([]byte(password), []byte(match.Password)) != 1 {
+		return nil
+	}
+
+	return match
 }
