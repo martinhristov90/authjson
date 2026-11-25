@@ -4,11 +4,14 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/vault/sdk/logical"
+	"github.com/martinhristov90/authjson/internal/jsonauthhelper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func TestPathRenew(t *testing.T) {
@@ -87,9 +90,23 @@ func TestPathRenew(t *testing.T) {
 	}
 }
 
+// The hash of the password "pw", with the lowest cost to keep the tests fast
+var renewTestHash = func() string {
+	hash, err := jsonauthhelper.HashPassword("pw", bcrypt.MinCost)
+	if err != nil {
+		panic(err)
+	}
+	return hash
+}()
+
+// withHash replaces the HASH placeholder of the test users files with the bcrypt hash of "pw"
+func withHash(content string) []byte {
+	return []byte(strings.ReplaceAll(content, "HASH", renewTestHash))
+}
+
 const renewTestUsers = `[
-{"user_id":"user-martin","email":"m@example.com","password":"pw","given_name":"Martin","family_name":"H","nickname":"M","team_role":"backline"},
-{"user_id":"user-other","email":"o@example.com","password":"pw","given_name":"Other","family_name":"U","nickname":"O","team_role":"backline"}
+{"user_id":"user-martin","email":"m@example.com","password":"HASH","given_name":"Martin","family_name":"H","nickname":"M","team_role":"backline"},
+{"user_id":"user-other","email":"o@example.com","password":"HASH","given_name":"Other","family_name":"U","nickname":"O","team_role":"backline"}
 ]`
 
 // setupRenewBackend configures a backend that uses a users file we are able to modify, and logs user-martin in
@@ -98,7 +115,7 @@ func setupRenewBackend(t *testing.T) (logical.Backend, logical.Storage, string, 
 	b, storage := getTestBackend(t)
 
 	usersFile := filepath.Join(t.TempDir(), "users.json")
-	require.NoError(t, os.WriteFile(usersFile, []byte(renewTestUsers), 0o600))
+	require.NoError(t, os.WriteFile(usersFile, withHash(renewTestUsers), 0o600))
 
 	resp, err := b.HandleRequest(context.Background(), &logical.Request{
 		Operation: logical.CreateOperation,
@@ -152,8 +169,8 @@ func TestPathRenew_UserRemovedFromFile(t *testing.T) {
 	b, storage, usersFile, auth := setupRenewBackend(t)
 
 	// Only the other user is left in the file
-	remaining := `[{"user_id":"user-other","password":"pw","team_role":"backline"}]`
-	require.NoError(t, os.WriteFile(usersFile, []byte(remaining), 0o600))
+	remaining := `[{"user_id":"user-other","password":"HASH","team_role":"backline"}]`
+	require.NoError(t, os.WriteFile(usersFile, withHash(remaining), 0o600))
 
 	_, err := renew(b, storage, auth)
 	assert.Equal(t, logical.ErrPermissionDenied, err)
@@ -162,8 +179,8 @@ func TestPathRenew_UserRemovedFromFile(t *testing.T) {
 func TestPathRenew_UserChangedTeam(t *testing.T) {
 	b, storage, usersFile, auth := setupRenewBackend(t)
 
-	moved := `[{"user_id":"user-martin","password":"pw","team_role":"manager"}]`
-	require.NoError(t, os.WriteFile(usersFile, []byte(moved), 0o600))
+	moved := `[{"user_id":"user-martin","password":"HASH","team_role":"manager"}]`
+	require.NoError(t, os.WriteFile(usersFile, withHash(moved), 0o600))
 
 	_, err := renew(b, storage, auth)
 	assert.Equal(t, logical.ErrPermissionDenied, err)

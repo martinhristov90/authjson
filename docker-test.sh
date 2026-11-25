@@ -13,6 +13,11 @@ fi
 
 GOOS=linux go build -o ./bin/vault-auth-jsonauth cmd/jsonauth/main.go
 
+# Generate the users file from the template (bcrypt hashes are not committed)
+DEMO_PASSWORD="hashed_password_here"
+HASH=$(printf '%s' "$DEMO_PASSWORD" | go run ./cmd/hashpw -cost 10)
+sed "s|REPLACE_WITH_BCRYPT_HASH|$HASH|" users.example.json > ./bin/users.json
+
 # Killing te container if it existed, otherwise true
 docker kill vaultplg 2>/dev/null || true
 
@@ -54,7 +59,7 @@ vault auth enable \
 vault read -field=plugin_version sys/auth/jsonauth/tune
 
 vault write auth/jsonauth/config \
-    users_file_path="/example/users.json"
+    users_file_path="/example/bin/users.json"
 
 
 
@@ -63,10 +68,10 @@ vault write auth/jsonauth/role/backline token_policies=backline_policy,backline_
 vault write auth/jsonauth/role/manager policies=manager_policy token_max_ttl=36h token_ttl=1h
 
 # Test for backline
-VAULT_TOKEN=  vault write auth/jsonauth/login password="hashed_password_here" username="user-martin"
+VAULT_TOKEN=  vault write auth/jsonauth/login password="$DEMO_PASSWORD" username="user-martin"
 
 # Test for core
-VAULT_TOKEN=  vault write auth/jsonauth/login password="hashed_password_here" username="user-khai"
+VAULT_TOKEN=  vault write auth/jsonauth/login password="$DEMO_PASSWORD" username="user-khai"
 
 # Test for manager
-VAULT_TOKEN=  vault write auth/jsonauth/login password="hashed_password_here" username="user-alex"
+VAULT_TOKEN=  vault write auth/jsonauth/login password="$DEMO_PASSWORD" username="user-alex"

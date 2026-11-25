@@ -106,7 +106,8 @@ func TestPathConfigReadWriteInvalidPath(t *testing.T) {
 // a failure of the loader results in an error response and that nothing is stored.
 func TestPathConfigWriteInvalidUsersFile(t *testing.T) {
 	tests := []struct{ name, content string }{
-		{"fails validation", `[{"user_id":"a","password":"p","team_role":"r"},{"user_id":"a","password":"q","team_role":"r"}]`},
+		{"fails validation", `[{"user_id":"a","password":"HASH","team_role":"r"},{"user_id":"a","password":"HASH","team_role":"r"}]`},
+		{"password is not a hash", `[{"user_id":"a","password":"plaintext","team_role":"r"}]`},
 		{"malformed JSON", `[{"user_id":"a"`},
 	}
 	for _, tt := range tests {
@@ -114,7 +115,7 @@ func TestPathConfigWriteInvalidUsersFile(t *testing.T) {
 			b, storage := getTestBackend(t)
 
 			usersFile := filepath.Join(t.TempDir(), "users.json")
-			require.NoError(t, os.WriteFile(usersFile, []byte(tt.content), 0o600))
+			require.NoError(t, os.WriteFile(usersFile, withHash(tt.content), 0o600))
 
 			resp, err := b.HandleRequest(context.Background(), &logical.Request{
 				Operation: logical.UpdateOperation,
