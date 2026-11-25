@@ -2,8 +2,13 @@ package authjson
 
 import (
 	"context"
-	"github.com/hashicorp/vault/sdk/logical"
+	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/hashicorp/vault/sdk/logical"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPathRenew(t *testing.T) {
@@ -80,4 +85,123 @@ func TestPathRenew(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %s resp: %#v\n", err, resp)
 	}
+}
+
+const renewTestUsers = `[
+{"user_id":"user-martin","email":"m@example.com","password":"pw","given_name":"Martin","family_name":"H","nickname":"M","team_role":"backline"},
+{"user_id":"user-other","email":"o@example.com","password":"pw","given_name":"Other","family_name":"U","nickname":"O","team_role":"backline"}
+]`
+
+// setupRenewBackend configures a backend that uses a users file we are able to modify, and logs user-martin in
+func setupRenewBackend(t *testing.T) (logical.Backend, logical.Storage, string, *logical.Auth) {
+	t.Helper()
+	b, storage := getTestBackend(t)
+
+	usersFile := filepath.Join(t.TempDir(), "users.json")
+	require.NoError(t, os.WriteFile(usersFile, []byte(renewTestUsers), 0o600))
+
+	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+		Operation: logical.CreateOperation,
+		Path:      "role/backline",
+		Storage:   storage,
+		Data:      map[string]interface{}{},
+	})
+	require.NoError(t, err)
+	require.False(t, resp != nil && resp.IsError(), "role creation failed: %#v", resp)
+
+	resp, err = b.HandleRequest(context.Background(), &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "config",
+		Storage:   storage,
+		Data:      map[string]interface{}{"users_file_path": usersFile},
+	})
+	require.NoError(t, err)
+	require.False(t, resp != nil && resp.IsError(), "config failed: %#v", resp)
+
+	resp, err = b.HandleRequest(context.Background(), &logical.Request{
+		Operation: logical.UpdateOperation,
+		Path:      "login",
+		Storage:   storage,
+		Data:      map[string]interface{}{"username": "user-martin", "password": "pw"},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.NotNil(t, resp.Auth)
+
+	return b, storage, usersFile, resp.Auth
+}
+
+func renew(b logical.Backend, storage logical.Storage, auth *logical.Auth) (*logical.Response, error) {
+	return b.HandleRequest(context.Background(), &logical.Request{
+		Operation: logical.RenewOperation,
+		Storage:   storage,
+		Auth:      auth,
+	})
+}
+
+func TestPathRenew_UserStillPresent(t *testing.T) {
+	b, storage, _, auth := setupRenewBackend(t)
+
+	resp, err := renew(b, storage, auth)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.NotNil(t, resp.Auth)
+}
+
+func TestPathRenew_UserRemovedFromFile(t *testing.T) {
+	b, storage, usersFile, auth := setupRenewBackend(t)
+
+	// Only the other user is left in the file
+	remaining := `[{"user_id":"user-other","password":"pw","team_role":"backline"}]`
+	require.NoError(t, os.WriteFile(usersFile, []byte(remaining), 0o600))
+
+	_, err := renew(b, storage, auth)
+	assert.Equal(t, logical.ErrPermissionDenied, err)
+}
+
+func TestPathRenew_UserChangedTeam(t *testing.T) {
+	b, storage, usersFile, auth := setupRenewBackend(t)
+
+	moved := `[{"user_id":"user-martin","password":"pw","team_role":"manager"}]`
+	require.NoError(t, os.WriteFile(usersFile, []byte(moved), 0o600))
+
+	_, err := renew(b, storage, auth)
+	assert.Equal(t, logical.ErrPermissionDenied, err)
+}
+
+func TestPathRenew_UsersFileUnreadable(t *testing.T) {
+	b, storage, usersFile, auth := setupRenewBackend(t)
+
+	require.NoError(t, os.Remove(usersFile))
+
+	_, err := renew(b, storage, auth)
+	assert.Equal(t, logical.ErrPermissionDenied, err)
+}
+
+func TestPathRenew_MissingInternalData(t *testing.T) {
+	b, storage, _, auth := setupRenewBackend(t)
+
+	// Tokens issued before user_id was stored cannot be renewed
+	delete(auth.InternalData, "user_id")
+	_, err := renew(b, storage, auth)
+	assert.Equal(t, logical.ErrPermissionDenied, err)
+
+	auth.InternalData = map[string]interface{}{}
+	_, err = renew(b, storage, auth)
+	assert.Equal(t, logical.ErrPermissionDenied, err)
+}
+
+func TestPathRenew_RoleDeleted(t *testing.T) {
+	b, storage, _, auth := setupRenewBackend(t)
+
+	resp, err := b.HandleRequest(context.Background(), &logical.Request{
+		Operation: logical.DeleteOperation,
+		Path:      "role/backline",
+		Storage:   storage,
+	})
+	require.NoError(t, err)
+	require.False(t, resp != nil && resp.IsError())
+
+	_, err = renew(b, storage, auth)
+	assert.Equal(t, logical.ErrPermissionDenied, err)
 }
