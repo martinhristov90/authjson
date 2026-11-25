@@ -3,6 +3,8 @@ package jsonauthhelper
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 )
 
@@ -17,6 +19,30 @@ type User struct {
 	TeamRole   string `json:"team_role"`
 }
 
+func validateUsers(users []User) error {
+	var errs []error
+	seen := make(map[string]int, len(users))
+	for i, u := range users {
+
+		if u.UserID == "" {
+			errs = append(errs, fmt.Errorf("user #%d: user_id is empty", i))
+			continue
+		}
+		if first, dup := seen[u.UserID]; dup {
+			errs = append(errs, fmt.Errorf("user %q (#%d): duplicate of user #%d", u.UserID, i, first))
+		} else {
+			seen[u.UserID] = i
+		}
+		if u.Password == "" {
+			errs = append(errs, fmt.Errorf("user %q: password is empty", u.UserID))
+		}
+		if u.TeamRole == "" {
+			errs = append(errs, fmt.Errorf("user %q: team_role is empty", u.UserID))
+		}
+	}
+	return errors.Join(errs...)
+}
+
 func LoadUsersFromFile(filePath string) ([]User, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -29,6 +55,11 @@ func LoadUsersFromFile(filePath string) ([]User, error) {
 	if err := decoder.Decode(&users); err != nil {
 		return nil, err
 	}
+
+	if err := validateUsers(users); err != nil {
+		return nil, fmt.Errorf("invalid users file: %w", err)
+	}
+
 	return users, nil
 }
 
