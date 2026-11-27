@@ -67,6 +67,13 @@ vault write auth/jsonauth/role/core token_policies=core_policy token_max_ttl=12h
 vault write auth/jsonauth/role/backline token_policies=backline_policy token_max_ttl=3h token_ttl=1h
 vault write auth/jsonauth/role/manager token_policies=manager_policy token_max_ttl=36h token_ttl=1h
 
+# External groups: a user gets the policy of the group that is named like its team_role
+ACCESSOR=$(vault auth list -format=json | jq -r '.["jsonauth/"].accessor')
+for team in core backline manager; do
+    GID=$(vault write -field=id identity/group name="$team" type=external policies="${team}_group_policy")
+    vault write identity/group-alias name="$team" mount_accessor="$ACCESSOR" canonical_id="$GID"
+done
+
 # Test for backline
 VAULT_TOKEN=  vault write auth/jsonauth/login password="$DEMO_PASSWORD" username="user-martin"
 
@@ -75,3 +82,7 @@ VAULT_TOKEN=  vault write auth/jsonauth/login password="$DEMO_PASSWORD" username
 
 # Test for manager
 VAULT_TOKEN=  vault write auth/jsonauth/login password="$DEMO_PASSWORD" username="user-alex"
+
+# The group policy must be on the token, user-khai is in the core team. jq -e fails the script if it is missing
+VAULT_TOKEN=  vault write -format=json auth/jsonauth/login password="$DEMO_PASSWORD" username="user-khai" \
+    | jq -e '.auth.identity_policies | index("core_group_policy")' >/dev/null

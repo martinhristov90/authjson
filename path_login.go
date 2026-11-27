@@ -24,7 +24,8 @@ func (b *backend) PathLogin() *framework.Path {
 			},
 		},
 		Callbacks: map[logical.Operation]framework.OperationFunc{
-			logical.UpdateOperation: b.pathAuthLogin,
+			logical.UpdateOperation:         b.pathAuthLogin,
+			logical.AliasLookaheadOperation: b.pathAuthLoginAliasLookahead,
 		},
 	}
 }
@@ -79,6 +80,17 @@ func (b *backend) pathAuthLogin(ctx context.Context, req *logical.Request, d *fr
 	// Login successful, create and return the auth response
 	authResponse := &logical.Auth{
 		DisplayName: fmt.Sprintf("%s %s", user.GivenName, user.FamilyName),
+		// The alias links the login to a Vault identity entity, the user_id is unique in the users file and does not change
+		Alias: &logical.Alias{
+			Name: user.UserID,
+			// Visible on the entity alias, usable in templated policies
+			Metadata: map[string]string{
+				"team_role": user.TeamRole,
+			},
+		},
+		// Adds the entity to the external group that has a group alias with this name on this mount.
+		// Vault ignores a name for which no external group and group alias exist.
+		GroupAliases: []*logical.Alias{{Name: user.TeamRole}},
 		//Internal data is not visible to the user, usually used during renew operations
 		InternalData: map[string]interface{}{
 			"team_role": user.TeamRole,
@@ -97,6 +109,22 @@ func (b *backend) pathAuthLogin(ctx context.Context, req *logical.Request, d *fr
 
 	// Login successful
 	return &logical.Response{Auth: authResponse}, nil
+}
+
+// pathAuthLoginAliasLookahead tells Vault which alias a login request would get, before the credentials are checked.
+// Vault uses it for features that need to know the user up front, such as user lockout and login MFA.
+// It must not authenticate anything, it only echoes the username as the alias name, the same one that pathAuthLogin returns.
+func (b *backend) pathAuthLoginAliasLookahead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
+	username := d.Get("username").(string)
+	if username == "" {
+		return nil, logical.ErrInvalidRequest
+	}
+
+	return &logical.Response{
+		Auth: &logical.Auth{
+			Alias: &logical.Alias{Name: username},
+		},
+	}, nil
 }
 
 // loadUsers reads the configuration from storage and loads the users from the file it points to
