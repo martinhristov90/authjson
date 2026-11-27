@@ -8,7 +8,9 @@ if ! command -v docker >/dev/null 2>&1 && command -v podman >/dev/null 2>&1; the
     }
 fi
 
-GOOS=linux go build -o ./bin/vault-auth-jsonauth cmd/jsonauth/main.go
+# Same version as the one of the git tag, see the Makefile
+VERSION=$(make -s version)
+make dev OUTPUT=./bin/vault-auth-jsonauth VERSION="$VERSION"
 
 # Generate the users file from the template (bcrypt hashes are not committed)
 DEMO_PASSWORD="hashed_password_here"
@@ -45,12 +47,13 @@ export VAULT_TOKEN=$(echo "$initoutput" | jq -r .root_token)
 
 vault write sys/plugins/catalog/auth/vault-auth-jsonauth \
     sha_256=$(shasum -a 256 ./bin/vault-auth-jsonauth | cut -d' ' -f1) \
-    command="vault-auth-jsonauth"
+    command="vault-auth-jsonauth" \
+    version="v$VERSION"
 
 vault auth enable \
     -path="jsonauth" \
     -plugin-name="vault-auth-jsonauth" \
-    -plugin-version=0.2.0 \
+    -plugin-version="v$VERSION" \
     plugin
 
 vault read -field=plugin_version sys/auth/jsonauth/tune
@@ -64,6 +67,13 @@ vault write auth/jsonauth/role/core token_policies=core_policy token_max_ttl=12h
 vault write auth/jsonauth/role/backline token_policies=backline_policy token_max_ttl=3h token_ttl=1h
 vault write auth/jsonauth/role/manager token_policies=manager_policy token_max_ttl=36h token_ttl=1h
 
+# External groups: a user gets the policy of the group that is named like its team_role
+ACCESSOR=$(vault auth list -format=json | jq -r '.["jsonauth/"].accessor')
+for team in core backline manager; do
+    GID=$(vault write -field=id identity/group name="$team" type=external policies="${team}_group_policy")
+    vault write identity/group-alias name="$team" mount_accessor="$ACCESSOR" canonical_id="$GID"
+done
+
 # Test for backline
 VAULT_TOKEN=  vault write auth/jsonauth/login password="$DEMO_PASSWORD" username="user-martin"
 
@@ -72,3 +82,7 @@ VAULT_TOKEN=  vault write auth/jsonauth/login password="$DEMO_PASSWORD" username
 
 # Test for manager
 VAULT_TOKEN=  vault write auth/jsonauth/login password="$DEMO_PASSWORD" username="user-alex"
+
+# The group policy must be on the token, user-khai is in the core team. jq -e fails the script if it is missing
+VAULT_TOKEN=  vault write -format=json auth/jsonauth/login password="$DEMO_PASSWORD" username="user-khai" \
+    | jq -e '.auth.identity_policies | index("core_group_policy")' >/dev/null

@@ -2,9 +2,9 @@ package version
 
 import "fmt"
 
-const Version = "0.2.0"
-
 var (
+	// Version and GitCommit are set at build time via -ldflags, see the Makefile
+	Version   = "0.0.0-dev"
 	Name      string
 	GitCommit string
 

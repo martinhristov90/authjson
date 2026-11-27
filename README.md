@@ -37,22 +37,24 @@ Run `./docker-test.sh`. It builds the plugin, starts a Vault server in a contain
 
 ## Install
 1. Clone the repository and change into its directory: `git clone https://github.com/martinhristov90/authjson && cd authjson`.
-2. Build the plugin for the OS and architecture of the Vault server (Linux on amd64 in this example):
+2. Build the plugin. The version is taken from the nearest git tag (for example the tag `v0.3.0` gives `0.3.0`, builds without a tag get a `0.0.0-dev-<commit>` version). `make version` prints it, and `make dev` builds for Linux (`GOOS` and `OUTPUT` can be overridden). For other architectures, set `GOARCH` of the Vault server:
     ```
-    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o vault-auth-jsonauth cmd/jsonauth/main.go
+    VERSION=$(make -s version)
+    GOARCH=amd64 make dev
     ```
-3. Put the binary in the `plugin_directory` of the Vault server, and register it:
+3. Put the binary in the `plugin_directory` of the Vault server, and register it with the same version:
     ```
     vault write sys/plugins/catalog/auth/vault-auth-jsonauth \
     sha_256=$(shasum -a 256 vault-auth-jsonauth | cut -d' ' -f1) \
-    command="vault-auth-jsonauth"
+    command="vault-auth-jsonauth" \
+    version="v$VERSION"
     ```
-4. Enable the plugin at the desired path (usually `jsonauth`). The version must match the one in [`internal/version/version.go`](internal/version/version.go):
+4. Enable the plugin at the desired path (usually `jsonauth`):
     ```
     vault auth enable \
     -path="jsonauth" \
     -plugin-name="vault-auth-jsonauth" \
-    -plugin-version=0.2.0 \
+    -plugin-version="v$VERSION" \
     plugin
     ```
 5. Create the users file, see [Users file](#users-file).
@@ -110,6 +112,24 @@ Example (`$2a$12$<SNIP>` stands for the full hash. `users.example.json` holds th
 ```
 
 Every user needs a unique `user_id`, a `password` that is a bcrypt hash and a `team_role`. The file is validated when the configuration is written, and again on every login and renew. If it is invalid (duplicate IDs, empty fields, plaintext passwords) writing the configuration fails with a message listing all the problems, and logins and renewals are denied until the file is fixed.
+
+## Identity entities and groups
+Every login is linked to a Vault identity entity. The entity alias is the `user_id`, and its metadata holds the `team_role`. The `team_role` is also reported as a group alias, so a user can get policies from an external identity group in addition to the policies of the role.
+
+Create one external group per team, with a group alias named like the `team_role`:
+```
+ACCESSOR=$(vault auth list -format=json | jq -r '.["jsonauth/"].accessor')
+GID=$(vault write -field=id identity/group name=core type=external policies=core_group_policy)
+vault write identity/group-alias name=core mount_accessor="$ACCESSOR" canonical_id="$GID"
+```
+A login of a user with `team_role: core` then shows `core_group_policy` under `identity_policies`, next to the policies of the role. `./docker-test.sh` does this for the three demo teams and fails if the policy is missing.
+
+Things to know:
+- The role is still required to login, the group only adds policies.
+- Vault ignores a group alias name that has no matching external group, so a typo silently removes the group's policies.
+- Anyone who can create group aliases can attach any policy to a team.
+- Group membership belongs to the entity and is refreshed at login. If a user moves to another team, the next login changes the groups of the entity, and tokens that were issued earlier see the new group policies until they expire. Renewing the old token is denied, because the team changed.
+- Entities and aliases stay in Vault after a user is removed from the file. An admin has to delete them.
 
 ## Upgrading
 Passwords in the users file used to be plaintext. They must now be bcrypt hashes, a file with plaintext passwords is rejected. Replace every password with its hash (see [Users file](#users-file)) before upgrading.
